@@ -1,0 +1,15 @@
+/ganpaint.egg-info
+*.pyc
+/datasets
+/models
+/results
+/client/.cache-loader/
+/client/node_modules
+/client/package-lock.json
+/imagesample
+__pycache__
+.DS_Store
+.__*
+.ipynb*
+.*swp
+.idea
