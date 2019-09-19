@@ -18,16 +18,19 @@ def as_url(data, source='zc'):
     b64 = base64.b64encode(buffered.getvalue()).decode('utf-8')
     return 'data:image/png;base64,%s' % (b64)
 
-def from_image(pil, target='zc'):
-    pt = transforms.functional.to_tensor(pil)
+def from_image(im, target='zc', size=None):
+    if im.format != 'RGB':
+        im = im.convert('RGB')
+    if size is not None:
+        im = im.resize(size)
+    pt = transforms.functional.to_tensor(im)
     renorm = renormalizer(source='pt', target=target)
     return renorm(pt)
 
-def from_url(url, target='zc'):
+def from_url(url, target='zc', size=None):
     image_data = re.sub('^data:image/.+;base64,', '', url)
     im = PIL.Image.open(io.BytesIO(base64.b64decode(image_data)))
-    im = im.convert('RGB')
-    return from_image(im, target)
+    return from_image(im, target, size=size)
 
 def renormalizer(source='zc', target='zc'):
     '''
