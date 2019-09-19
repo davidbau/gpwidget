@@ -1,0 +1,125 @@
+swagger: '2.0'
+info:
+  title: GanEncode API
+  version: "0.1"
+consumes:
+  - application/json
+produces:
+  - application/json
+
+basePath: /api
+
+paths:
+  /all_projects:
+    get:
+      tags:
+        - all
+      summary: information about all projects and sources available
+      operationId: encoder.server.get_all_projects
+      responses:
+        200:
+          description: return list of projects
+          schema:
+            type: array
+            items:
+              type: object
+
+  /generate:
+    post:
+      summary: generates images for given ids together withedits
+      operationId: encoder.server.post_generate
+      tags:
+        - all
+      parameters:
+        - in: body
+          name: gen_req
+          description: GenerateRequest
+          schema:
+            $ref: "#/definitions/GenerateRequest"
+      responses:
+        200:
+          description: return a set of generated images
+
+  /upload:
+    post:
+      summary: processes images into a given id
+      operationId: encoder.server.post_upload
+      tags:
+        - all
+      parameters:
+        - in: body
+          name: upload_req
+          description: UploadRequest
+          schema:
+            $ref: "#/definitions/UploadRequest"
+      responses:
+        200:
+          description: return image ID
+          schema:
+            type: string
+
+#parameters:
+#  project:
+#    name: project
+#    description: project ID
+#    in: query
+#    required: true
+#    type: string
+
+definitions:
+
+  UploadRequest:
+    type: object
+    required:
+      - project
+      - image
+    properties:
+      project:
+        type: string
+        default: kitchen
+      image:
+        type: string
+
+  GenerateRequest:
+    type: object
+    required:
+      - project
+      - ids
+    properties:
+      project:
+        type: string
+        default: kitchen
+      ids:
+        type: array
+        items:
+          type: string
+      save:
+        type: boolean
+        default: False
+      interventions:
+        type: array
+        items:
+          - $ref: '#/definitions/Intervention'
+      interpolations:
+        type: array
+        description: list of interpolations for interventions
+        items:
+          type: number
+
+  Intervention:
+    type: object
+    properties:
+      value_mask:
+        type: string
+        description: a base64 encoded alpha image as mask
+      feature:
+        type: string
+        description: feature for that mask
+      strength:
+        type: number
+        description: strength of feature
+        default: 1.0
+      erase:
+        type: boolean
+        description: set to True if erasing feature
+        default: false
