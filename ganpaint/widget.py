@@ -25,8 +25,8 @@ class PaintWidget(DOMWidget):
 
 g_defined_widgets = {}
 def inject_js_definition(js, redefine=False):
-    if not redefine and js in g_defined_widgets:
-        return
+    # if not redefine and js in g_defined_widgets:
+    #    return
     display(Javascript(js))
     g_defined_widgets[js] = True
 
