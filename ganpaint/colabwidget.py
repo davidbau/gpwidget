@@ -1,5 +1,5 @@
 """
-colabwidget
+colabwidget by David Bau.
 
 Defines WidgetModel and WidgetProperty, which set up data binding
 using the communication channels available in the google colab
@@ -40,8 +40,8 @@ User interaction should update the javascript model using
 model.set('propname', value); this will propagate to the python
 model and trigger any registered python listeners.
 
-
-TODO: 
+TODO: also implement support for jupyter javascript Comm channels,
+so widgets can be platform independent.
 """
 
 import json, html
