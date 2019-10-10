@@ -40,6 +40,9 @@ User interaction should update the javascript model using
 model.set('propname', value); this will propagate to the python
 model and trigger any registered python listeners.
 
+Communication pattern goes in a V shape:
+User entry -> js model set -> python model ->  js model get -> User feedback
+
 TODO: also implement support for jupyter javascript Comm channels,
 so widgets can be platform independent.
 """
@@ -83,17 +86,22 @@ class WidgetModel {
     sendToPython(this._id, name, value);
   }
   on(name, fn) {
-    if (!this._listeners.hasOwnProperty(name)) {
-      this._listeners[name] = [];
-    }
-    this._listeners[name].push(fn);
+    name.split().forEach((n) => {
+      if (!this._listeners.hasOwnProperty(n)) {
+        this._listeners[n] = [];
+      }
+      this._listeners[n].push(fn);
+    });
   }
   off(name, fn) {
-    if (!fn) {
-      delete this._listeners[name];
-    } else if (this._listeners.hasOwnProperty(name)) {
-      this._listeners = this._listeners.filter((e) => { return e !== fn; });
-    }
+    name.split().forEach((n) => {
+      if (!fn) {
+        delete this._listeners[n];
+      } else if (this._listeners.hasOwnProperty(n)) {
+        this._listeners[n] = this._listeners[n].filter(
+            (e) => { return e !== fn; });
+      }
+    });
   }
 }
 """
@@ -109,71 +117,81 @@ class WidgetEvent(object):
       return
 
 class WidgetModel(object):
-  def __init__(self):
-    self._listeners = {}
-    self._viewcount = 0
-    def handle_remote_set(name, value):
-      assert name in self._listeners, 'Protocol error: notified on ' + name
-      setattr(self, name, value)
-      for cb in self._listeners[name]:
-        cb(value)
-    self._recv_from_js(handle_remote_set)
+    def __init__(self):
+        self._listeners = {}
+        self._viewcount = 0
+        def handle_remote_set(name, value):
+            assert name in self._listeners, 'Protocol error: unknown ' + name
+            setattr(self, name, value)
+            for cb in self._listeners[name]:
+                cb(value)
+        self._recv_from_js(handle_remote_set)
 
-  def on(name, cb):
-    assert name in self._listeners, 'Can only listen to WidgetProperties'
-    self._listeners[name].append(cb)
+    def on(self, name, cb):
+        for n in name.split():
+            if n not in self._listeners:
+                raise ValueError(n + ' is not a WidgetProperty')
+            self._listeners[n].append(cb)
 
-  def widget_html(self):
-    return ''
-  
-  def widget_js(self):
-    return ''
+    def off(self, name, cb):
+        for n in name.split():
+            if n not in self._listeners:
+                raise ValueError(n + ' is not a WidgetProperty')
+            self._listeners[n] = [c for c in self._listeners[n] if c != cb]
 
-  def view_id(self):
-    return f"_{id(self)}_{self._viewcount}"
+    def widget_html(self):
+        return ''
 
-  def _repr_html_(self):
-    self._viewcount += 1
-    json_data = json.dumps({
-        k: v.value for k, v in vars(self).items()
-        if isinstance(v, WidgetProperty)})
-    return f"""
-    {self.widget_html()}
-    <script>
-    (function() {{
-    {WIDGET_MODEL_JS}
-    var model = new WidgetModel("{id(self)}", {json_data});
-    {self.widget_js()}
-    }})();
-    </script>
-    """
+    def widget_js(self):
+        return ''
 
-  def __setattr__(self, name, value):
-    if isinstance(value, (WidgetProperty, WidgetEvent)):
-      assert self._listeners is not None, "Must call super.__init__() first."
-      if name not in self._listeners:
-        self._listeners[name] = []
-    elif hasattr(self, name):
-      curvalue = super().__getattribute__(name)
-      if isinstance(curvalue, WidgetProperty):
-        curvalue.value = value
-        self._send_to_js(id(self), name, value)
-        return
-      elif isinstance(curvalue, WidgetEvent):
-        assert False, "Cannot redefine an event."
-    super().__setattr__(name, value)
+    def view_id(self):
+        return f"_{id(self)}_{self._viewcount}"
 
-  def __getattribute__(self, name):
-    curvalue = super().__getattribute__(name)
-    if isinstance(curvalue, WidgetProperty):
-      return curvalue.value
-    return curvalue
-  
-  def _send_to_js(self, *args):
-    output.eval_js(f"""
-    (window.send_{id(self)} = window.send_{id(self)} ||
-    new BroadcastChannel("channel_{id(self)}")).postMessage({json.dumps(args)});
-    """, ignore_result=True)
+    def _repr_html_(self):
+        self._viewcount += 1
+        json_data = json.dumps({
+                k: v.value for k, v in vars(self).items()
+                if isinstance(v, WidgetProperty)})
+        return f"""
+        {self.widget_html()}
+        <script>
+        (function() {{
+        {WIDGET_MODEL_JS}
+        var model = new WidgetModel("{id(self)}", {json_data});
+        {self.widget_js()}
+        }})();
+        </script>
+        """
 
-  def _recv_from_js(self, fn):
-    output.register_callback(f"invoke_{id(self)}", fn)
+    def __setattr__(self, name, value):
+        if isinstance(value, (WidgetProperty, WidgetEvent)):
+            if self._listeners not None:
+                raise ValueError("Must call super.__init__() first.")
+            if name not in self._listeners:
+                self._listeners[name] = []
+        elif hasattr(self, name):
+            curvalue = super().__getattribute__(name)
+            if isinstance(curvalue, WidgetProperty):
+                curvalue.value = value
+                self._send_to_js(id(self), name, value)
+                return
+            elif isinstance(curvalue, WidgetEvent):
+                raise AttributeError("Cannot redefine an event.")
+        super().__setattr__(name, value)
+
+    def __getattribute__(self, name):
+        curvalue = super().__getattribute__(name)
+        if isinstance(curvalue, WidgetProperty):
+            return curvalue.value
+        return curvalue
+
+    def _send_to_js(self, *args):
+        output.eval_js(f"""
+        (window.send_{id(self)} = window.send_{id(self)} ||
+        new BroadcastChannel("channel_{id(self)}")
+        ).postMessage({json.dumps(args)});
+        """, ignore_result=True)
+
+    def _recv_from_js(self, fn):
+        output.register_callback(f"invoke_{id(self)}", fn)
