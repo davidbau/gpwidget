@@ -166,7 +166,7 @@ class WidgetModel(object):
 
     def __setattr__(self, name, value):
         if isinstance(value, (WidgetProperty, WidgetEvent)):
-            if self._listeners is not None:
+            if self._listeners is None:
                 raise ValueError("Must call super.__init__() first.")
             if name not in self._listeners:
                 self._listeners[name] = []
