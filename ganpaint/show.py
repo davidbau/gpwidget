@@ -38,7 +38,9 @@ def rows_tags(obj):
 
 def blocks_tags(obj):
     results = []
-    if isinstance(obj, PIL.Image.Image):
+    if hasattr(obj, '_repr_html_'):
+        results.append(obj._repr_html_())
+    elif isinstance(obj, PIL.Image.Image):
         results.append(pil_to_html(obj))
     elif isinstance(obj, (str, int, float)):
         results.append('<div>')
