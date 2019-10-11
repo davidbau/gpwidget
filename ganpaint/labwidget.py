@@ -299,7 +299,8 @@ class WidgetModel(object):
         else:
             super().__setattr__(name, value)
             if isinstance(value, WidgetEvent):
-                # Initialize WidgetEvent/Properties by attaching to js.
+                if not hasattr(self, '_viewcount'):
+                    raise ValueError('base WidgetModel __init__ must be called')
                 def trigger_js(value):
                     self._send_to_js(id(self), name, value)
                 if isinstance(value, WidgetEvent):
