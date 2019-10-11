@@ -57,6 +57,7 @@ TODO: Support jupyterlab also.
 """
 
 import json, html
+from inspect import signature
 
 WIDGET_ENV = None
 if WIDGET_ENV is None:
@@ -210,7 +211,10 @@ class WidgetEvent(object):
             raise ValueError('only properties can be set to a value')
     def trigger(self, value):
         for cb in self._listeners:
-            cb(value)
+            if len(signature(cb).parameters) == 0:
+                cb() # no-parameter callback.
+            else:
+                cb(value)
     def on(self, cb):
         self._listeners.append(cb)
     def off(self, cb):
