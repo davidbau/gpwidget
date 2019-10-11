@@ -80,6 +80,10 @@ function recvFromPython(obj_id, fn) {
     window[recvname] = new BroadcastChannel("channel_" + obj_id);
   }
   window[recvname].addEventListener("message", (ev) => {
+    if (ev.data == 'ok') {
+      window[recvname].ok = true;
+      return;
+    }
     fn.apply(null, ev.data.slice(1));
   });
 }
@@ -90,15 +94,32 @@ function sendToPython(obj_id, ...args) {
 function getComm(obj_id) {
   var cname = "comm_" + obj_id;
   if (window[cname] === undefined) {
-    var comm = Jupyter.notebook.kernel.comm_manager.new_comm(cname);
+    var comm = Jupyter.notebook.kernel.comm_manager.new_comm(cname, {});
     comm.recvlist = [];
     comm.on_msg((ev) => {
+      if (comm.timeout) {
+        clearInterval(comm.timeout);
+        comm.timeout = null;
+      }
+      if (ev.content.data == 'ok') {
+        return;
+      }
       var args = ev.content.data.slice(1);
       for (fn of comm.recvlist) {
         fn.apply(null, args);
       }
     });
     window[cname] = comm;
+    function reopen() {
+      comm.open();
+    }
+    comm.timeout = setInterval(() => {
+      if (window[cname] != comm) {
+        clearInterval(comm.timeout);
+      } else {
+        comm.open(); // Retry opening if no messages are received
+      }
+    }, 2000);
   }
   return window[cname];
 }
@@ -128,7 +149,7 @@ class WidgetModel {
     return this._data[name];
   }
   set(name, value) {
-    // Don't set the model directly.  Python callback will do it.
+    // Do not set the model directly.  Python callback will do it.
     sendToPython(this._id, name, value);
   }
   trigger(name, value) {
@@ -155,19 +176,66 @@ class WidgetModel {
 }
 """
 
-
-
-class WidgetProperty(object):
-    def __init__(self, value=None):
-      self.value = value
-
 class WidgetEvent(object):
+    """
+    Events provide a tree notification protocol where view interactions
+    are requested at a leaf and the authoritative model sits at the root.
+    Interaction requests are passed up to the root, and at the root, the
+    handle method is called.  By default, the handle method just accepts
+    the request and triggers handlers and notifications down the tree.
+    """
     def __init__(self):
-      return
+        self._listeners = []
+        self.parent = None
+    def handle(self, value):
+        self.trigger(value)
+    def request(self, value):
+        if self.parent is not None:
+            self.parent.request(value)
+        else:
+            self.handle(value)
+    def set(self, value):
+        if self.parent is not None:
+            self.parent.off(self.handle)
+            self.parent = None
+        if isinstance(value, WidgetEvent):
+            ancestor = value.parent
+            while ancestor is not None:
+                if ancestor == self:
+                    raise ValueError('bound properties should not form a loop')
+                ancestor = ancestor.parent
+            self.parent = value
+            self.parent.on(self.handle)
+        elif not isinstance(self, WidgetProperty):
+            raise ValueError('only properties can be set to a value')
+    def trigger(self, value):
+        for cb in self._listeners:
+            cb(value)
+    def on(self, cb):
+        self._listeners.append(cb)
+    def off(self, cb):
+        self._listeners = [c for c in self._listeners if c != cb]
+
+class WidgetProperty(WidgetEvent):
+    """
+    A property is just a WidgetEvent that remembers its last value;
+    setting a value makes it a root, and notifies children of the new value.
+    """
+    def __init__(self, value=None):
+        super().__init__()
+        self.set(value)
+    def handle(self, value):
+        self.value = value
+        self.trigger(value)
+    def set(self, value):
+        super().set(value)
+        if isinstance(value, WidgetProperty):
+            value = value.value
+        if not isinstance(value, WidgetEvent):
+            self.handle(value)
 
 class WidgetModel(object):
     def __init__(self):
-        self._listeners = {}
         # In the jupyter case, we need to handle more details.
         # We could have multiple comms, and there can be some delay
         # between js injection and comm creation, so we need to queue
@@ -176,21 +244,16 @@ class WidgetModel(object):
         self._queue = []
         self._viewcount = 0
         def handle_remote_set(name, value):
-            assert name in self._listeners, 'Protocol error: unknown ' + name
-            setattr(self, name, value)
+            self.prop(name).request(value)
         self._recv_from_js(handle_remote_set)
 
     def on(self, name, cb):
         for n in name.split():
-            if n not in self._listeners:
-                raise ValueError(n + ' is not a WidgetProperty')
-            self._listeners[n].append(cb)
+            self.prop(n).on(cb)
 
     def off(self, name, cb):
         for n in name.split():
-            if n not in self._listeners:
-                raise ValueError(n + ' is not a WidgetProperty')
-            self._listeners[n] = [c for c in self._listeners[n] if c != cb]
+            self.prop(n).off(cb)
 
     def widget_html(self):
         return f'<div id="{self.view_id()}"></div>'
@@ -218,25 +281,29 @@ class WidgetModel(object):
         </script>
         """
 
+    def prop(self, name):
+        curvalue = super().__getattribute__(name)
+        if not isinstance(curvalue, WidgetEvent):
+            raise AttributeError('%s not a property or event but %s' 
+                    % (name, str(type(curvalue))))
+        return curvalue
+
     def __setattr__(self, name, value):
-        if isinstance(value, (WidgetProperty, WidgetEvent)):
-            if self._listeners is None:
-                raise ValueError("Must call super.__init__() first.")
-            if name not in self._listeners:
-                self._listeners[name] = []
-        elif hasattr(self, name):
+        if hasattr(self, name):
             curvalue = super().__getattribute__(name)
-            if isinstance(curvalue, WidgetProperty):
-                curvalue.value = value
-                # Send to remote listeners
-                self._send_to_js(id(self), name, value)
-                # And local listeners also
-                for cb in self._listeners[name]:
-                    cb(value)
-                return
-            elif isinstance(curvalue, WidgetEvent):
-                raise AttributeError("Cannot redefine an event.")
-        super().__setattr__(name, value)
+            if isinstance(curvalue, WidgetEvent):
+                # Delegte "set" to the underlying WidgetProperty.
+                curvalue.set(value)
+            else:
+                super().__setattr__(name, value)
+        else:
+            super().__setattr__(name, value)
+            if isinstance(value, WidgetEvent):
+                # Initialize WidgetEvent/Properties by attaching to js.
+                def trigger_js(value):
+                    self._send_to_js(id(self), name, value)
+                if isinstance(value, WidgetEvent):
+                    value.on(trigger_js)
 
     def __getattribute__(self, name):
         curvalue = super().__getattribute__(name)
@@ -245,18 +312,19 @@ class WidgetModel(object):
         return curvalue
 
     def _send_to_js(self, *args):
-        if WIDGET_ENV == 'colab':
-            google.colab.output.eval_js(f"""
-            (window.send_{id(self)} = window.send_{id(self)} ||
-            new BroadcastChannel("channel_{id(self)}")
-            ).postMessage({json.dumps(args)});
-            """, ignore_result=True)
-        elif WIDGET_ENV == 'jupyter':
-            if not self._comms:
-                self._queue.append(args)
-                return
-            for comm in self._comms:
-                comm.send(args)
+        if self._viewcount > 0:
+            if WIDGET_ENV == 'colab':
+                google.colab.output.eval_js(f"""
+                (window.send_{id(self)} = window.send_{id(self)} ||
+                new BroadcastChannel("channel_{id(self)}")
+                ).postMessage({json.dumps(args)});
+                """, ignore_result=True)
+            elif WIDGET_ENV == 'jupyter':
+                if not self._comms:
+                    self._queue.append(args)
+                    return
+                for comm in self._comms:
+                    comm.send(args)
 
     def _recv_from_js(self, fn):
         if WIDGET_ENV == 'colab':
@@ -268,6 +336,7 @@ class WidgetModel(object):
             def open_comm(comm, open_msg):
                 self._comms.append(comm)
                 comm.on_msg(handle_comm)
+                comm.send('ok')
                 if self._queue:
                     for args in self._queue:
                         comm.send(args)
