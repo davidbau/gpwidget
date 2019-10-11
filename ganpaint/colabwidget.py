@@ -1,35 +1,45 @@
 """
-colabwidget by David Bau.
+labwidget by David Bau.
+
+Base class for a lightweight javascript notebook widget framework
+that is portable across Google colab and Jupyter notebooks.
+No use of requirejs: the design uses all inline javascript.
 
 Defines WidgetModel and WidgetProperty, which set up data binding
-using the communication channels available in the google colab
-environment.  New can be defined as in the following example.
+using the communication channels available in either google colab
+environment or jupyter notebook.  New can be defined as in the
+following example.
 
 class TextWidget(WidgetModel):
-  def __init__(self):
+  def __init__(self, value='', width=20):
     super().__init__()
-    # After super().init(), databinding is done using WidgetProperty objects.
-    self.value = WidgetProperty('')
-    self.width = WidgetProperty(20)
+    # databinding is defined using WidgetProperty objects.
+    self.value = WidgetProperty(value)
+    self.width = WidgetProperty(width)
+    self.esc = WidgetEvent()
 
   def widget_js(self):
-    # A special javascript "model" object is provided
+    # Both "model" and "element" objects are defined within the scope
+    # where the js is run.  "element" looks for the element with id
+    # self.view_id(); if widget_html is overridden, this id should be used.
     return '''
-      var elt = document.getElementById("%s");
-      elt.value = model.get('value');
-      elt.width = model.get('width');
-      elt.addEventListener('keydown', (e) => {
+      element.value = model.get('value');
+      element.width = model.get('width');
+      element.addEventListener('keydown', (e) => {
         if (e.code == 'Enter') {
-          model.set('value', elt.value);
+          model.set('value', element.value);
+        }
+        if (e.code == 'Esc') {
+          model.trigger('esc', 'my event payload')
         }
       });
       model.on('value', (value) => {
-        elt.value = model.get('value');
+        element.value = model.get('value');
       });
       model.on('width', (value) => {
-        elt.width = model.get('width');
+        element.width = model.get('width');
       });
-    ''' % self.view_id()
+    '''
   def widget_html(self):
     return f'''
     <input id="{self.view_id()}"
@@ -43,14 +53,27 @@ model and trigger any registered python listeners.
 Communication pattern goes in a V shape:
 User entry -> js model set -> python model ->  js model get -> User feedback
 
-TODO: also implement support for jupyter javascript Comm channels,
-so widgets can be platform independent.
+TODO: Support jupyterlab also.
 """
 
 import json, html
-from google.colab import output
 
-WIDGET_MODEL_JS = """
+WIDGET_ENV = None
+if WIDGET_ENV is None:
+    try:
+        from google.colab import output as colab_output
+        WIDGET_ENV = 'colab'
+    except:
+        pass
+if WIDGET_ENV is None:
+    try:
+        from ipykernel.comm import Comm as jupyter_comm
+        get_ipython().kernel.comm_manager
+        WIDGET_ENV = 'jupyter'
+    except:
+        pass
+
+SEND_RECV_JS = """
 function recvFromPython(obj_id, fn) {
   var recvname = "recv_" + obj_id;
   if (window[recvname] === undefined) {
@@ -63,6 +86,32 @@ function recvFromPython(obj_id, fn) {
 function sendToPython(obj_id, ...args) {
   google.colab.kernel.invokeFunction('invoke_' + obj_id, args, {})
 }
+""" if WIDGET_ENV == 'colab' else """
+function getComm(obj_id) {
+  var cname = "comm_" + obj_id;
+  if (window[cname] === undefined) {
+    var comm = Jupyter.notebook.kernel.comm_manager.new_comm(cname);
+    comm.recvlist = [];
+    comm.on_msg((ev) => {
+      var args = ev.content.data.slice(1);
+      for (fn of comm.recvlist) {
+        fn.apply(null, args);
+      }
+    });
+    window[cname] = comm;
+  }
+  return window[cname];
+}
+function recvFromPython(obj_id, fn) {
+  getComm(obj_id).recvlist.push(fn);
+}
+function sendToPython(obj_id, ...args) {
+  getComm(obj_id).send(args);
+}
+"""
+
+
+WIDGET_MODEL_JS = SEND_RECV_JS + """
 class WidgetModel {
   constructor(obj_id, init) {
     this._id = obj_id;
@@ -119,12 +168,16 @@ class WidgetEvent(object):
 class WidgetModel(object):
     def __init__(self):
         self._listeners = {}
+        # In the jupyter case, we need to handle more details.
+        # We could have multiple comms, and there can be some delay
+        # between js injection and comm creation, so we need to queue
+        # messages until the first comm is created.
+        self._comms = []
+        self._queue = []
         self._viewcount = 0
         def handle_remote_set(name, value):
             assert name in self._listeners, 'Protocol error: unknown ' + name
             setattr(self, name, value)
-            for cb in self._listeners[name]:
-                cb(value)
         self._recv_from_js(handle_remote_set)
 
     def on(self, name, cb):
@@ -140,7 +193,7 @@ class WidgetModel(object):
             self._listeners[n] = [c for c in self._listeners[n] if c != cb]
 
     def widget_html(self):
-        return ''
+        return f'<div id="{self.view_id()}"></div>'
 
     def widget_js(self):
         return ''
@@ -159,6 +212,7 @@ class WidgetModel(object):
         (function() {{
         {WIDGET_MODEL_JS}
         var model = new WidgetModel("{id(self)}", {json_data});
+        var element = document.getElementById("{self.view_id()}");
         {self.widget_js()}
         }})();
         </script>
@@ -174,7 +228,11 @@ class WidgetModel(object):
             curvalue = super().__getattribute__(name)
             if isinstance(curvalue, WidgetProperty):
                 curvalue.value = value
+                # Send to remote listeners
                 self._send_to_js(id(self), name, value)
+                # And local listeners also
+                for cb in self._listeners[name]:
+                    cb(value)
                 return
             elif isinstance(curvalue, WidgetEvent):
                 raise AttributeError("Cannot redefine an event.")
@@ -187,11 +245,34 @@ class WidgetModel(object):
         return curvalue
 
     def _send_to_js(self, *args):
-        output.eval_js(f"""
-        (window.send_{id(self)} = window.send_{id(self)} ||
-        new BroadcastChannel("channel_{id(self)}")
-        ).postMessage({json.dumps(args)});
-        """, ignore_result=True)
+        if WIDGET_ENV == 'colab':
+            google.colab.output.eval_js(f"""
+            (window.send_{id(self)} = window.send_{id(self)} ||
+            new BroadcastChannel("channel_{id(self)}")
+            ).postMessage({json.dumps(args)});
+            """, ignore_result=True)
+        elif WIDGET_ENV == 'jupyter':
+            if not self._comms:
+                self._queue.append(args)
+                return
+            for comm in self._comms:
+                comm.send(args)
 
     def _recv_from_js(self, fn):
-        output.register_callback(f"invoke_{id(self)}", fn)
+        if WIDGET_ENV == 'colab':
+            google.colab.output.register_callback(f"invoke_{id(self)}", fn)
+        elif WIDGET_ENV == 'jupyter':
+            def handle_comm(msg):
+                fn(*(msg['content']['data']))
+                # TODO: handle closing also.
+            def open_comm(comm, open_msg):
+                self._comms.append(comm)
+                comm.on_msg(handle_comm)
+                if self._queue:
+                    for args in self._queue:
+                        comm.send(args)
+                    self._queue.clear()
+                if open_msg['content']['data']:
+                    handle_comm(open_msg)
+            cname = "comm_" + str(id(self))
+            get_ipython().kernel.comm_manager.register_target(cname, open_comm)
