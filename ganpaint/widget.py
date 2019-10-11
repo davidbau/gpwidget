@@ -2,16 +2,17 @@ from ganpaint.labwidget import WidgetModel, WidgetProperty
 import html
 
 class PaintWidget(WidgetModel):
-  def __init__(self, image=''):
+  def __init__(self,
+          width=256, height=256,
+          image='', mask='', brushsize=10.0, disabled=False):
     super().__init__()
-    # After super().init(), databinding is done using WidgetProperty objects.
-    self.mask = WidgetProperty('')
+    self.mask = WidgetProperty(mask)
     self.image = WidgetProperty(image)
-    self.brushsize = WidgetProperty(10.0)
+    self.brushsize = WidgetProperty(brushsize)
     self.erase = WidgetProperty(False)
-    self.disabled = WidgetProperty(False)
-    self.width = WidgetProperty(256)
-    self.height = WidgetProperty(256)
+    self.disabled = WidgetProperty(disabled)
+    self.width = WidgetProperty(width)
+    self.height = WidgetProperty(height)
 
   def widget_js(self):
     return f'''
