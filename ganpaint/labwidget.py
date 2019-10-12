@@ -92,43 +92,28 @@ function sendToPython(obj_id, ...args) {
   google.colab.kernel.invokeFunction('invoke_' + obj_id, args, {})
 }
 """ if WIDGET_ENV == 'colab' else """
-function getComm(obj_id) {
+function getChan(obj_id) {
   var cname = "comm_" + obj_id;
-  if (window[cname] === undefined) {
-    var comm = Jupyter.notebook.kernel.comm_manager.new_comm(cname, {});
-    comm.recvlist = [];
-    comm.on_msg((ev) => {
-      if (comm.timeout) {
-        clearInterval(comm.timeout);
-        comm.timeout = null;
-      }
-      if (ev.content.data == 'ok') {
-        return;
-      }
+  if (!window[cname]) { window[cname] = []; }
+  var chan = window[cname];
+  if (!chan.comm && Jupyter.notebook.kernel) {
+    chan.comm = Jupyter.notebook.kernel.comm_manager.new_comm(cname, {});
+    chan.comm.on_msg((ev) => {
+      if (chan.retry) { clearInterval(chan.retry); chan.retry = null; }
+      if (ev.content.data == 'ok') { return; }
       var args = ev.content.data.slice(1);
-      for (fn of comm.recvlist) {
-        fn.apply(null, args);
-      }
+      for (fn of chan) { fn.apply(null, args); }
     });
-    window[cname] = comm;
-    function reopen() {
-      comm.open();
-    }
-    comm.timeout = setInterval(() => {
-      if (window[cname] != comm) {
-        clearInterval(comm.timeout);
-      } else {
-        comm.open(); // Retry opening if no messages are received
-      }
-    }, 2000);
+    chan.retry = setInterval(() => { chan.comm.open(); }, 2000);
   }
-  return window[cname];
+  return chan;
 }
 function recvFromPython(obj_id, fn) {
-  getComm(obj_id).recvlist.push(fn);
+  getChan(obj_id).push(fn);
 }
 function sendToPython(obj_id, ...args) {
-  getComm(obj_id).send(args);
+  var comm = getChan(obj_id).comm;
+  if (comm) { comm.send(args); }
 }
 """
 
@@ -338,9 +323,13 @@ class WidgetModel(object):
             def handle_comm(msg):
                 fn(*(msg['content']['data']))
                 # TODO: handle closing also.
+            def handle_close(close_msg):
+                comm_id = close_msg['content']['comm_id']
+                self._comms = [c for c in self._comms if c.comm_id != comm_id]
             def open_comm(comm, open_msg):
                 self._comms.append(comm)
                 comm.on_msg(handle_comm)
+                comm.on_close(handle_close)
                 comm.send('ok')
                 if self._queue:
                     for args in self._queue:
@@ -350,3 +339,60 @@ class WidgetModel(object):
                     handle_comm(open_msg)
             cname = "comm_" + str(id(self))
             get_ipython().kernel.comm_manager.register_target(cname, open_comm)
+
+##########################################################################
+## Specific widgets
+##########################################################################
+
+class Button(WidgetModel):
+    def __init__(self, label='button'):
+        super().__init__()
+        self.click = WidgetEvent()
+        self.label = WidgetProperty(label)
+    def widget_js(self):
+        return '''
+          element.addEventListener('click', (e) => {
+            model.trigger('click');
+          })
+          model.on('label', (v) => {
+            element.value = v;
+          })
+        '''
+    def widget_html(self):
+        return f'''
+          <input id="{self.view_id()}" type="button"
+            value="{html.escape(self.label)}">
+        '''
+
+
+class Textbox(WidgetModel):
+  def __init__(self, value='', size=20):
+    super().__init__()
+    # databinding is defined using WidgetProperty objects.
+    self.value = WidgetProperty(value)
+    self.size = WidgetProperty(size)
+
+  def widget_js(self):
+    # Both "model" and "element" objects are defined within the scope
+    # where the js is run.  "element" looks for the element with id
+    # self.view_id(); if widget_html is overridden, this id should be used.
+    return '''
+      element.value = model.get('value');
+      element.size = model.get('size');
+      element.addEventListener('keydown', (e) => {
+        if (e.code == 'Enter') {
+          model.set('value', element.value);
+        }
+      });
+      model.on('value', (value) => {
+        element.value = model.get('value');
+      });
+      model.on('size', (value) => {
+        element.size = model.get('size');
+      });
+    '''
+  def widget_html(self):
+    return f'''
+    <input id="{self.view_id()}"
+       value="{html.escape(self.value)}" size="{self.size}">
+    '''
