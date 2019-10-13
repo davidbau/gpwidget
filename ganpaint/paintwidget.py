@@ -1,7 +1,7 @@
-from ganpaint.labwidget import WidgetModel, WidgetProperty
+from ganpaint.labwidget import Widget, WidgetProperty
 import html
 
-class PaintWidget(WidgetModel):
+class PaintWidget(Widget):
   def __init__(self,
           width=256, height=256,
           image='', mask='', brushsize=10.0, disabled=False):

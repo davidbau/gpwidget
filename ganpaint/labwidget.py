@@ -224,6 +224,45 @@ class WidgetProperty(WidgetEvent):
             self.handle(value)
 
 class WidgetModel(object):
+
+    def on(self, name, cb):
+        for n in name.split():
+            self.prop(n).on(cb)
+
+    def off(self, name, cb):
+        for n in name.split():
+            self.prop(n).off(cb)
+
+    def prop(self, name):
+        curvalue = super().__getattribute__(name)
+        if not isinstance(curvalue, WidgetEvent):
+            raise AttributeError('%s not a property or event but %s' 
+                    % (name, str(type(curvalue))))
+        return curvalue
+
+    def _initprop(self, name, value):
+        return
+
+    def __setattr__(self, name, value):
+        if hasattr(self, name):
+            curvalue = super().__getattribute__(name)
+            if isinstance(curvalue, WidgetEvent):
+                # Delegte "set" to the underlying WidgetProperty.
+                curvalue.set(value)
+            else:
+                super().__setattr__(name, value)
+        else:
+            super().__setattr__(name, value)
+            if isinstance(value, WidgetEvent):
+                self._initprop(name, value)
+
+    def __getattribute__(self, name):
+        curvalue = super().__getattribute__(name)
+        if isinstance(curvalue, WidgetProperty):
+            return curvalue.value
+        return curvalue
+
+class Widget(WidgetModel):
     def __init__(self):
         # In the jupyter case, we need to handle more details.
         # We could have multiple comms, and there can be some delay
@@ -235,14 +274,6 @@ class WidgetModel(object):
         def handle_remote_set(name, value):
             self.prop(name).request(value)
         self._recv_from_js(handle_remote_set)
-
-    def on(self, name, cb):
-        for n in name.split():
-            self.prop(n).on(cb)
-
-    def off(self, name, cb):
-        for n in name.split():
-            self.prop(n).off(cb)
 
     def widget_html(self):
         return f'<div id="{self.view_id()}"></div>'
@@ -270,36 +301,13 @@ class WidgetModel(object):
         </script>
         """
 
-    def prop(self, name):
-        curvalue = super().__getattribute__(name)
-        if not isinstance(curvalue, WidgetEvent):
-            raise AttributeError('%s not a property or event but %s' 
-                    % (name, str(type(curvalue))))
-        return curvalue
-
-    def __setattr__(self, name, value):
-        if hasattr(self, name):
-            curvalue = super().__getattribute__(name)
-            if isinstance(curvalue, WidgetEvent):
-                # Delegte "set" to the underlying WidgetProperty.
-                curvalue.set(value)
-            else:
-                super().__setattr__(name, value)
-        else:
-            super().__setattr__(name, value)
-            if isinstance(value, WidgetEvent):
-                if not hasattr(self, '_viewcount'):
-                    raise ValueError('base WidgetModel __init__ must be called')
-                def trigger_js(value):
-                    self._send_to_js(id(self), name, value)
-                if isinstance(value, WidgetEvent):
-                    value.on(trigger_js)
-
-    def __getattribute__(self, name):
-        curvalue = super().__getattribute__(name)
-        if isinstance(curvalue, WidgetProperty):
-            return curvalue.value
-        return curvalue
+    def _initprop(self, name, value):
+        if not hasattr(self, '_viewcount'):
+            raise ValueError('base WidgetModel __init__ must be called')
+        def trigger_js(value):
+            self._send_to_js(id(self), name, value)
+        if isinstance(value, WidgetEvent):
+            value.on(trigger_js)
 
     def _send_to_js(self, *args):
         if self._viewcount > 0:
@@ -344,7 +352,7 @@ class WidgetModel(object):
 ## Specific widgets
 ##########################################################################
 
-class Button(WidgetModel):
+class Button(Widget):
     def __init__(self, label='button'):
         super().__init__()
         self.click = WidgetEvent()
@@ -365,7 +373,7 @@ class Button(WidgetModel):
         '''
 
 
-class Textbox(WidgetModel):
+class Textbox(Widget):
   def __init__(self, value='', size=20):
     super().__init__()
     # databinding is defined using WidgetProperty objects.
