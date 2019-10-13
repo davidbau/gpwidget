@@ -314,7 +314,7 @@ class Widget(WidgetModel):
     def _send_to_js(self, *args):
         if self._viewcount > 0:
             if WIDGET_ENV == 'colab':
-                google.colab.output.eval_js(f"""
+                colab_output.eval_js(f"""
                 (window.send_{id(self)} = window.send_{id(self)} ||
                 new BroadcastChannel("channel_{id(self)}")
                 ).postMessage({json.dumps(args)});
@@ -328,7 +328,7 @@ class Widget(WidgetModel):
 
     def _recv_from_js(self, fn):
         if WIDGET_ENV == 'colab':
-            google.colab.output.register_callback(f"invoke_{id(self)}", fn)
+            colab_output.register_callback(f"invoke_{id(self)}", fn)
         elif WIDGET_ENV == 'jupyter':
             def handle_comm(msg):
                 fn(*(msg['content']['data']))
