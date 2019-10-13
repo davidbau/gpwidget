@@ -228,10 +228,12 @@ class WidgetModel(object):
     def on(self, name, cb):
         for n in name.split():
             self.prop(n).on(cb)
+        return self
 
     def off(self, name, cb):
         for n in name.split():
             self.prop(n).off(cb)
+        return self
 
     def prop(self, name):
         curvalue = super().__getattribute__(name)
@@ -372,35 +374,54 @@ class Button(Widget):
             value="{html.escape(self.label)}">
         '''
 
+class Label(Widget):
+    def __init__(self, value=''):
+        super().__init__()
+        # databinding is defined using WidgetProperty objects.
+        self.value = WidgetProperty(value)
+
+    def widget_js(self):
+        # Both "model" and "element" objects are defined within the scope
+        # where the js is run.    "element" looks for the element with id
+        # self.view_id(); if widget_html is overridden, this id should be used.
+        return '''
+            model.on('value', (value) => {
+                element.innerText = model.get('value');
+            });
+        '''
+    def widget_html(self):
+        return f'''
+        <label id="{self.view_id()}">{html.escape(self.value)}</label>
+        '''
 
 class Textbox(Widget):
-  def __init__(self, value='', size=20):
-    super().__init__()
-    # databinding is defined using WidgetProperty objects.
-    self.value = WidgetProperty(value)
-    self.size = WidgetProperty(size)
+    def __init__(self, value='', size=20):
+        super().__init__()
+        # databinding is defined using WidgetProperty objects.
+        self.value = WidgetProperty(value)
+        self.size = WidgetProperty(size)
 
-  def widget_js(self):
-    # Both "model" and "element" objects are defined within the scope
-    # where the js is run.  "element" looks for the element with id
-    # self.view_id(); if widget_html is overridden, this id should be used.
-    return '''
-      element.value = model.get('value');
-      element.size = model.get('size');
-      element.addEventListener('keydown', (e) => {
-        if (e.code == 'Enter') {
-          model.set('value', element.value);
-        }
-      });
-      model.on('value', (value) => {
-        element.value = model.get('value');
-      });
-      model.on('size', (value) => {
-        element.size = model.get('size');
-      });
-    '''
-  def widget_html(self):
-    return f'''
-    <input id="{self.view_id()}"
-       value="{html.escape(self.value)}" size="{self.size}">
-    '''
+    def widget_js(self):
+        # Both "model" and "element" objects are defined within the scope
+        # where the js is run.    "element" looks for the element with id
+        # self.view_id(); if widget_html is overridden, this id should be used.
+        return '''
+            element.value = model.get('value');
+            element.size = model.get('size');
+            element.addEventListener('keydown', (e) => {
+                if (e.code == 'Enter') {
+                    model.set('value', element.value);
+                }
+            });
+            model.on('value', (value) => {
+                element.value = model.get('value');
+            });
+            model.on('size', (value) => {
+                element.size = model.get('size');
+            });
+        '''
+    def widget_html(self):
+        return f'''
+        <input id="{self.view_id()}"
+             value="{html.escape(self.value)}" size="{self.size}">
+        '''
