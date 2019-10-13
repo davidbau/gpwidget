@@ -43,7 +43,7 @@ class TextWidget(WidgetModel):
   def widget_html(self):
     return f'''
     <input id="{self.view_id()}"
-       value="{html.escape(self.value)}" width="{self.width}">
+       value="{html.escape(str(self.value))}" width="{self.width}">
     '''
 
 User interaction should update the javascript model using
@@ -371,7 +371,7 @@ class Button(Widget):
     def widget_html(self):
         return f'''
           <input id="{self.view_id()}" type="button"
-            value="{html.escape(self.label)}">
+            value="{html.escape(str(self.label))}">
         '''
 
 class Label(Widget):
@@ -391,7 +391,7 @@ class Label(Widget):
         '''
     def widget_html(self):
         return f'''
-        <label id="{self.view_id()}">{html.escape(self.value)}</label>
+        <label id="{self.view_id()}">{html.escape(str(self.value))}</label>
         '''
 
 class Textbox(Widget):
@@ -423,5 +423,33 @@ class Textbox(Widget):
     def widget_html(self):
         return f'''
         <input id="{self.view_id()}"
-             value="{html.escape(self.value)}" size="{self.size}">
+             value="{html.escape(str(self.value))}" size="{self.size}">
+        '''
+
+class Range(Widget):
+    def __init__(self, value=50, min=0, max=100):
+        super().__init__()
+        # databinding is defined using WidgetProperty objects.
+        self.value = WidgetProperty(value)
+        self.min = WidgetProperty(min)
+        self.max = WidgetProperty(max)
+
+    def widget_js(self):
+        # Both "model" and "element" objects are defined within the scope
+        # where the js is run.    "element" looks for the element with id
+        # self.view_id(); if widget_html is overridden, this id should be used.
+        return '''
+            element.addEventListener('input', (e) => {
+              model.set('value', element.value);
+            });
+            model.on('value', (value) => {
+              if (!element.matches(':active')) {
+                element.value = value;
+              }
+            })
+        '''
+    def widget_html(self):
+        return f'''
+        <input id="{self.view_id()}" type="range"
+             value="{self.value}" min="{self.min}" max="{self.max}">
         '''
