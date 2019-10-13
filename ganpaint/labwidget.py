@@ -435,11 +435,10 @@ class Range(Widget):
         self.max = WidgetProperty(max)
 
     def widget_js(self):
-        # Both "model" and "element" objects are defined within the scope
-        # where the js is run.    "element" looks for the element with id
-        # self.view_id(); if widget_html is overridden, this id should be used.
+        # Note that the 'input' event would enable during-drag feedback,
+        # but this is pretty slow on google colab.
         return '''
-            element.addEventListener('input', (e) => {
+            element.addEventListener('change', (e) => {
               model.set('value', element.value);
             });
             model.on('value', (value) => {
