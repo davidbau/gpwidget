@@ -60,12 +60,12 @@ import json, html
 from inspect import signature
 
 WIDGET_ENV = None
-#if WIDGET_ENV is None:
-#    try:
-#        from google.colab import output as colab_output
-#        WIDGET_ENV = 'colab'
-#    except:
-#        pass
+if WIDGET_ENV is None:
+    try:
+        from google.colab import output as colab_output
+        WIDGET_ENV = 'colab'
+    except:
+        pass
 if WIDGET_ENV is None:
     try:
         from ipykernel.comm import Comm as jupyter_comm
