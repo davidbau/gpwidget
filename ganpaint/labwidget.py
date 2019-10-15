@@ -142,7 +142,7 @@ class WidgetModel {
     sendToPython(this._id, name, value);
   }
   on(name, fn) {
-    name.split().forEach((n) => {
+    name.split(/\s+/).forEach((n) => {
       if (!this._listeners.hasOwnProperty(n)) {
         this._listeners[n] = [];
       }
@@ -150,7 +150,7 @@ class WidgetModel {
     });
   }
   off(name, fn) {
-    name.split().forEach((n) => {
+    name.split(/\s+/).forEach((n) => {
       if (!fn) {
         delete this._listeners[n];
       } else if (this._listeners.hasOwnProperty(n)) {
@@ -451,4 +451,72 @@ class Range(Widget):
         return f'''
         <input id="{self.view_id()}" type="range"
              value="{self.value}" min="{self.min}" max="{self.max}">
+        '''
+
+class Choice(Widget):
+    def __init__(self, choices=None, horizontal=False):
+        super().__init__()
+        if choices is None:
+            choices = []
+        self.choices = WidgetProperty(choices)
+        self.horizontal = WidgetProperty(horizontal)
+        self.selection = WidgetProperty(None)
+    def widget_js(self):
+        # Note that the 'input' event would enable during-drag feedback,
+        # but this is pretty slow on google colab.
+        return '''
+          function esc(unsafe) {
+            return unsafe.replace(/&/g, "&amp;").replace(/</g, "&lt;")
+                   .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+          }
+          function render() {
+            console.log('rendering');
+            var lines = model.get('choices').map((c) => {
+              return '<label><input type="radio" name="choice" value="' +
+                 esc(c) + '">' + esc(c) + '</label>'
+            });
+            element.innerHTML = lines.join(model.get('horizontal')?' ':'<br>');
+          }
+          model.on('choices horizontal', render);
+          model.on('selection', (selection) => {
+            [...element.querySelectorAll('input')].forEach((e) => {
+              e.checked = (e.value == selection);
+            })
+          });
+          element.addEventListener('change', (e) => {
+            model.set('selection', element.choice.value);
+          });
+        '''
+    def widget_html(self):
+        radios = [
+            f"""<label><input name="choice" type="radio"
+            value="{html.escape(value)}">{html.escape(value)}</label>"""
+            for value in self.choices ]
+        sep = " " if self.horizontal else "<br>"
+        return f'<form id="{self.view_id()}">{sep.join(radios)}</form>'
+
+class Div(Widget):
+    def __init__(self, innerHTML=''):
+        super().__init__()
+        # databinding is defined using WidgetProperty objects.
+        self.innerHTML = WidgetProperty(innerHTML)
+
+    def print(self, text, replace=False):
+        newHTML = '<pre>%s</pre>' % html.escape(str(text));
+        if replace:
+            self.innerHTML = newHTML
+        else:
+            self.innerHTML += newHTML
+
+    def widget_js(self):
+        # Note that the 'input' event would enable during-drag feedback,
+        # but this is pretty slow on google colab.
+        return '''
+          model.on('innerHTML', (innerHTML) => {
+            element.innerHTML = innerHTML;
+          })
+        '''
+    def widget_html(self):
+        return f'''
+          <div id="{self.view_id()}">{self.innerHTML}</div>
         '''
