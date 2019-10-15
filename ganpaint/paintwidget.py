@@ -1,15 +1,16 @@
-from ganpaint.labwidget import Widget, WidgetProperty
+from .labwidget import Widget, WidgetProperty
 import html
 
 class PaintWidget(Widget):
   def __init__(self,
           width=256, height=256,
-          image='', mask='', brushsize=10.0, disabled=False):
+          image='', mask='', brushsize=10.0, oneshot=False, disabled=False):
     super().__init__()
     self.mask = WidgetProperty(mask)
     self.image = WidgetProperty(image)
     self.brushsize = WidgetProperty(brushsize)
     self.erase = WidgetProperty(False)
+    self.oneshot = WidgetProperty(oneshot)
     self.disabled = WidgetProperty(disabled)
     self.width = WidgetProperty(width)
     self.height = WidgetProperty(height)
@@ -46,6 +47,11 @@ class PaintWidget {
   mouse_stroke(first_event) {
     var self = this;
     if (self.model.get('disabled')) { return; }
+    if (self.model.get('oneshot')) {
+        var canvas = self.mask_canvas;
+        var ctx = canvas.getContext('2d');
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+    }
     function track_mouse(evt) {
       if (evt.type == 'keydown' || self.model.get('disabled')) {
         if (self.model.get('disabled') || evt.key === "Escape") {
