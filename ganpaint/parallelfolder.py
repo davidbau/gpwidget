@@ -4,9 +4,9 @@ information, such as parallel feature channels in separate files,
 cached files with lists of filenames, etc.
 '''
 
-import os, torch, re, random
+import os, torch, re, random, numpy, itertools
 import torch.utils.data as data
-from torchvision.datasets.folder import default_loader
+from torchvision.datasets.folder import default_loader as tv_default_loader
 from PIL import Image
 from collections import OrderedDict
 from . import pbar
@@ -14,6 +14,24 @@ from . import pbar
 def grayscale_loader(path):
     with open(path, 'rb') as f:
         return Image.open(f).convert('L')
+
+class ndarray(numpy.ndarray):
+    '''
+    Wrapper to make ndarrays into heap objects so that shared_state can
+    be attached as an attribute.
+    '''
+    pass
+
+def default_loader(filename):
+    '''
+    Handles both numpy files and image formats.
+    '''
+    if filename.endswith('.npy'):
+        return numpy.load(filename).view(ndarray)
+    elif filename.endswith('.npz'):
+        return numpy.load(filename)
+    else:
+        return tv_default_loader(filename)
 
 class ParallelImageFolders(data.Dataset):
     """
@@ -82,10 +100,14 @@ class ParallelImageFolders(data.Dataset):
         # coordinated.
         shared_state = {}
         for s in sources:
-            s.shared_state = shared_state
+            try:
+                s.shared_state = shared_state
+            except:
+                pass
         if self.transforms is not None:
-            sources = [transform(source)
-                    for source, transform in zip(sources, self.transforms)]
+            sources = [transform(source) if transform is not None else source
+                    for source, transform
+                    in itertools.zip_longest(sources, self.transforms)]
         if self.stacker is not None:
             sources = self.stacker(sources)
             if self.classes is not None:
@@ -112,8 +134,8 @@ def walk_image_files(rootdir, verbose=None):
     if os.path.isfile(indexfile):
         basedir = os.path.dirname(rootdir)
         with open(indexfile) as f:
-            result = [os.path.join(basedir, line.strip())
-                for line in f.readlines()]
+            result = sorted([os.path.join(basedir, line.strip())
+                for line in f.readlines()])
             return result
     result = []
     for dirname, _, fnames in sorted(pbar(os.walk(rootdir),
@@ -150,7 +172,7 @@ def make_parallel_dataset(image_roots, classification=False,
         classes, class_to_idx = None, None
     tuples = []
     for key, value in image_sets.items():
-        if len(value) != len(image_roots) + 1 if classification else 0:
+        if len(value) != len(image_roots) + (1 if classification else 0):
             if intersection:
                 continue
             else:
@@ -161,3 +183,4 @@ def make_parallel_dataset(image_roots, classification=False,
             continue
         tuples.append(value)
     return tuples, classes, class_to_idx
+

@@ -1,5 +1,5 @@
 import numpy, math
-from ganpaint import customnet, nethook
+from . import customnet, nethook
 from collections import OrderedDict
 import torch.nn
 import re

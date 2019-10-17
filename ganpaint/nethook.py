@@ -337,7 +337,7 @@ def set_requires_grad(requires_grad, *models):
         if isinstance(model, torch.nn.Module):
             for param in model.parameters():
                 param.requires_grad = requires_grad
-        elif isinstance(model, torch.nn.Parameter):
+        elif isinstance(model, (torch.nn.Parameter, torch.Tensor)):
             model.requires_grad = requires_grad
         else:
             assert False, 'unknown type %r' % type(model)

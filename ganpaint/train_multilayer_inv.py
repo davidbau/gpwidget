@@ -1,12 +1,12 @@
 import torch, multiprocessing, itertools, os, shutil, PIL, argparse, numpy
 from torch.nn.functional import mse_loss
-from ganpaint import pbar, setting
-from ganpaint import encoder_net
-from ganpaint import nethook, zdataset
-from ganpaint import proggan, customnet, parallelfolder
+from . import pbar, setting
+from . import encoder_net
+from . import nethook, zdataset
+from . import proggan, customnet, parallelfolder
 from torchvision import transforms, models
 from torchvision.models.vgg import model_urls
-from ganpaint.pidfile import exit_if_job_done, mark_job_done
+from .pidfile import exit_if_job_done, mark_job_done
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--lr', type=float, help='Learning rate', default=0.01)
@@ -110,7 +110,7 @@ def visualize_results(epoch, z_batch, encoder, decoder):
             'epoch_%d_%d_g.png' % (epoch, i)))
         save_tensor_image(recovered[i], os.path.join(dirname,
             'epoch_%d_%d_r.png' % (epoch, i)))
-    shutil.copy('ganpaint/lightbox.html',
+    shutil.copy(os.path.join(os.path.dirname(__file__), 'lightbox.html'),
             os.path.join(dirname, '+lightbox.html'))
 
 def save_tensor_image(img, filename):

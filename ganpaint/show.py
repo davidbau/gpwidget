@@ -49,16 +49,16 @@ def blocks_tags(obj):
     elif isinstance(obj, dict):
         results.extend(blocks_tags([(k, v) for k, v in obj.items()]))
     elif hasattr(obj, '__iter__'):
-        blockstart, tstart, rstart, cstart, cend, rend, tend, blockend = [
+        blockstart, blockend, tstart, tend, rstart, rend, cstart, cend = [
           '<div style="display:inline-block;text-align:center;line-height:1;' +
               'vertical-align:top;padding:1px">',
+          '</div>',
           '<table style="display:inline-table">',
+          '</table>',
           '<tr style="padding:0">',
+          '</tr>',
           '<td style="text-align:left; vertical-align:top; padding:1px">',
           '</td>',
-          '</tr>',
-          '</table>',
-          '</div>',
           ]
         needs_end = False
         table_mode = False
