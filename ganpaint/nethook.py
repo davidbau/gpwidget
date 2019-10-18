@@ -44,6 +44,12 @@ class InstrumentedModel(torch.nn.Module):
     def forward(self, *inputs, **kwargs):
         return self.model(*inputs, **kwargs)
 
+    def layer_names(self):
+        '''
+        Returns a list of fully-qualified layer names that can be hooked.
+        '''
+        return [name for name, layer in self.model.named_modules()]
+
     def retain_layer(self, layername, detach=True):
         '''
         Pass a fully-qualified layer name (E.g., module.submodule.conv3)

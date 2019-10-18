@@ -22,7 +22,7 @@ def from_image(im, target='zc', size=None):
     if im.format != 'RGB':
         im = im.convert('RGB')
     if size is not None:
-        im = im.resize(size)
+        im = im.resize(size, resample=PIL.Image.BICUBIC)
     pt = transforms.functional.to_tensor(im)
     renorm = renormalizer(source='pt', target=target)
     return renorm(pt)
