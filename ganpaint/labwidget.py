@@ -5,7 +5,7 @@ Base class for a lightweight javascript notebook widget framework
 that is portable across Google colab and Jupyter notebooks.
 No use of requirejs: the design uses all inline javascript.
 
-Defines WidgetModel and WidgetProperty, which set up data binding
+Defines WidgetModel and Property, which set up data binding
 using the communication channels available in either google colab
 environment or jupyter notebook.  New can be defined as in the
 following example.
@@ -13,10 +13,10 @@ following example.
 class TextWidget(WidgetModel):
   def __init__(self, value='', width=20):
     super().__init__()
-    # databinding is defined using WidgetProperty objects.
-    self.value = WidgetProperty(value)
-    self.width = WidgetProperty(width)
-    self.esc = WidgetEvent()
+    # databinding is defined using Property objects.
+    self.value = Property(value)
+    self.width = Property(width)
+    self.esc = Event()
 
   def widget_js(self):
     # Both "model" and "element" objects are defined within the scope
@@ -162,7 +162,7 @@ class WidgetModel {
 }
 """
 
-class WidgetEvent(object):
+class Event(object):
     """
     Events provide a tree notification protocol where view interactions
     are requested at a leaf and the authoritative model sits at the root.
@@ -184,7 +184,7 @@ class WidgetEvent(object):
         if self.parent is not None:
             self.parent.off(self.handle)
             self.parent = None
-        if isinstance(value, WidgetEvent):
+        if isinstance(value, Event):
             ancestor = value.parent
             while ancestor is not None:
                 if ancestor == self:
@@ -192,7 +192,7 @@ class WidgetEvent(object):
                 ancestor = ancestor.parent
             self.parent = value
             self.parent.on(self.handle)
-        elif not isinstance(self, WidgetProperty):
+        elif not isinstance(self, Property):
             raise ValueError('only properties can be set to a value')
     def trigger(self, value):
         for cb in self._listeners:
@@ -205,10 +205,11 @@ class WidgetEvent(object):
     def off(self, cb):
         self._listeners = [c for c in self._listeners if c != cb]
 
-class WidgetProperty(WidgetEvent):
+class Property(Event):
     """
-    A property is just a WidgetEvent that remembers its last value;
-    setting a value makes it a root, and notifies children of the new value.
+    A Property is just an Event that remembers its last value;
+    setting a value makes it a root, and notifies children
+    of the new value.
     """
     def __init__(self, value=None):
         super().__init__()
@@ -218,9 +219,9 @@ class WidgetProperty(WidgetEvent):
         self.trigger(value)
     def set(self, value):
         super().set(value)
-        if isinstance(value, WidgetProperty):
+        if isinstance(value, Property):
             value = value.value
-        if not isinstance(value, WidgetEvent):
+        if not isinstance(value, Event):
             self.handle(value)
 
 class WidgetModel(object):
@@ -237,7 +238,7 @@ class WidgetModel(object):
 
     def prop(self, name):
         curvalue = super().__getattribute__(name)
-        if not isinstance(curvalue, WidgetEvent):
+        if not isinstance(curvalue, Event):
             raise AttributeError('%s not a property or event but %s' 
                     % (name, str(type(curvalue))))
         return curvalue
@@ -248,19 +249,19 @@ class WidgetModel(object):
     def __setattr__(self, name, value):
         if hasattr(self, name):
             curvalue = super().__getattribute__(name)
-            if isinstance(curvalue, WidgetEvent):
-                # Delegte "set" to the underlying WidgetProperty.
+            if isinstance(curvalue, Event):
+                # Delegte "set" to the underlying Property.
                 curvalue.set(value)
             else:
                 super().__setattr__(name, value)
         else:
             super().__setattr__(name, value)
-            if isinstance(value, WidgetEvent):
+            if isinstance(value, Event):
                 self._initprop(name, value)
 
     def __getattribute__(self, name):
         curvalue = super().__getattribute__(name)
-        if isinstance(curvalue, WidgetProperty):
+        if isinstance(curvalue, Property):
             return curvalue.value
         return curvalue
 
@@ -290,7 +291,7 @@ class Widget(WidgetModel):
         self._viewcount += 1
         json_data = json.dumps({
                 k: v.value for k, v in vars(self).items()
-                if isinstance(v, WidgetProperty)})
+                if isinstance(v, Property)})
         return f"""
         {self.widget_html()}
         <script>
@@ -308,7 +309,7 @@ class Widget(WidgetModel):
             raise ValueError('base WidgetModel __init__ must be called')
         def trigger_js(value):
             self._send_to_js(id(self), name, value)
-        if isinstance(value, WidgetEvent):
+        if isinstance(value, Event):
             value.on(trigger_js)
 
     def _send_to_js(self, *args):
@@ -357,8 +358,8 @@ class Widget(WidgetModel):
 class Button(Widget):
     def __init__(self, label='button'):
         super().__init__()
-        self.click = WidgetEvent()
-        self.label = WidgetProperty(label)
+        self.click = Event()
+        self.label = Property(label)
     def widget_js(self):
         return '''
           element.addEventListener('click', (e) => {
@@ -377,8 +378,8 @@ class Button(Widget):
 class Label(Widget):
     def __init__(self, value=''):
         super().__init__()
-        # databinding is defined using WidgetProperty objects.
-        self.value = WidgetProperty(value)
+        # databinding is defined using Property objects.
+        self.value = Property(value)
 
     def widget_js(self):
         # Both "model" and "element" objects are defined within the scope
@@ -397,9 +398,9 @@ class Label(Widget):
 class Textbox(Widget):
     def __init__(self, value='', size=20):
         super().__init__()
-        # databinding is defined using WidgetProperty objects.
-        self.value = WidgetProperty(value)
-        self.size = WidgetProperty(size)
+        # databinding is defined using Property objects.
+        self.value = Property(value)
+        self.size = Property(size)
 
     def widget_js(self):
         # Both "model" and "element" objects are defined within the scope
@@ -429,10 +430,10 @@ class Textbox(Widget):
 class Range(Widget):
     def __init__(self, value=50, min=0, max=100):
         super().__init__()
-        # databinding is defined using WidgetProperty objects.
-        self.value = WidgetProperty(value)
-        self.min = WidgetProperty(min)
-        self.max = WidgetProperty(max)
+        # databinding is defined using Property objects.
+        self.value = Property(value)
+        self.min = Property(min)
+        self.max = Property(max)
 
     def widget_js(self):
         # Note that the 'input' event would enable during-drag feedback,
@@ -458,9 +459,9 @@ class Choice(Widget):
         super().__init__()
         if choices is None:
             choices = []
-        self.choices = WidgetProperty(choices)
-        self.horizontal = WidgetProperty(horizontal)
-        self.selection = WidgetProperty(None)
+        self.choices = Property(choices)
+        self.horizontal = Property(horizontal)
+        self.selection = Property(None)
     def widget_js(self):
         # Note that the 'input' event would enable during-drag feedback,
         # but this is pretty slow on google colab.
@@ -498,8 +499,8 @@ class Choice(Widget):
 class Div(Widget):
     def __init__(self, innerHTML=''):
         super().__init__()
-        # databinding is defined using WidgetProperty objects.
-        self.innerHTML = WidgetProperty(innerHTML)
+        # databinding is defined using Property objects.
+        self.innerHTML = Property(innerHTML)
 
     def print(self, text, replace=False):
         newHTML = '<pre>%s</pre>' % html.escape(str(text));

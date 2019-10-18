@@ -1,4 +1,4 @@
-from .labwidget import Widget, WidgetProperty
+from .labwidget import Widget, Property
 import html
 
 class PaintWidget(Widget):
@@ -6,14 +6,14 @@ class PaintWidget(Widget):
           width=256, height=256,
           image='', mask='', brushsize=10.0, oneshot=False, disabled=False):
     super().__init__()
-    self.mask = WidgetProperty(mask)
-    self.image = WidgetProperty(image)
-    self.brushsize = WidgetProperty(brushsize)
-    self.erase = WidgetProperty(False)
-    self.oneshot = WidgetProperty(oneshot)
-    self.disabled = WidgetProperty(disabled)
-    self.width = WidgetProperty(width)
-    self.height = WidgetProperty(height)
+    self.mask = Property(mask)
+    self.image = Property(image)
+    self.brushsize = Property(brushsize)
+    self.erase = Property(False)
+    self.oneshot = Property(oneshot)
+    self.disabled = Property(disabled)
+    self.width = Property(width)
+    self.height = Property(height)
 
   def widget_js(self):
     return f'''
