@@ -56,7 +56,7 @@ User entry -> js model set -> python model ->  js model get -> User feedback
 TODO: Support jupyterlab also.
 """
 
-import json, html
+import json, html, re
 from inspect import signature
 
 class Model(object):
@@ -168,6 +168,7 @@ class Widget(Model):
         json_data = json.dumps({
                 k: v.value for k, v in vars(self).items()
                 if isinstance(v, Property)})
+        json_data = re.sub('</', '<\\/', json_data)
         return f"""
         {self.widget_html()}
         <script>
@@ -225,7 +226,7 @@ class Widget(Model):
                 if open_msg['content']['data']:
                     handle_comm(open_msg)
             cname = "comm_" + str(id(self))
-            get_ipython().kernel.comm_manager.register_target(cname, open_comm)
+            COMM_MANAGER.register_target(cname, open_comm)
 
 class Event(object):
     """
@@ -357,7 +358,7 @@ class Button(Widget):
         '''
     def widget_html(self):
         return f'''
-          <input id="{self.view_id()}" type="button"
+          <input id="{self.view_id()}" type="button" style="display:block"
             value="{html.escape(str(self.label))}">
         '''
 
@@ -409,7 +410,7 @@ class Textbox(Widget):
         '''
     def widget_html(self):
         return f'''
-          <input id="{self.view_id()}"
+          <input id="{self.view_id()}" style="display:block"
              value="{html.escape(str(self.value))}" size="{self.size}">
         '''
 
@@ -496,11 +497,18 @@ class Div(Widget):
             self.innerHTML += newHTML
 
     def widget_js(self):
-        # Note that the 'input' event would enable during-drag feedback,
-        # but this is pretty slow on google colab.
+        # Note that if we want innerHTML to support script execution,
+        # we need to do it explicitly, like this.
         return '''
           model.on('innerHTML', (innerHTML) => {
             element.innerHTML = innerHTML;
+            Array.from(element.querySelectorAll("script")).forEach(old=>{
+              const newScript = document.createElement("script");
+              Array.from(old.attributes).forEach(attr =>
+                 newScript.setAttribute(attr.name, attr.value));
+              newScript.appendChild(document.createTextNode(old.innerHTML));
+              old.parentNode.replaceChild(newScript, old);
+            });
           })
         '''
     def widget_html(self):
@@ -522,7 +530,7 @@ if WIDGET_ENV is None:
 if WIDGET_ENV is None:
     try:
         from ipykernel.comm import Comm as jupyter_comm
-        get_ipython().kernel.comm_manager
+        COMM_MANAGER = get_ipython().kernel.comm_manager
         WIDGET_ENV = 'jupyter'
     except:
         pass
