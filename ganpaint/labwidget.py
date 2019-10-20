@@ -5,13 +5,13 @@ Base class for a lightweight javascript notebook widget framework
 that is portable across Google colab and Jupyter notebooks.
 No use of requirejs: the design uses all inline javascript.
 
-Defines Model, Widget, Event, and Property, which set up data binding
+Defines Model, Widget, Trigger, and Property, which set up data binding
 using the communication channels available in either google colab
 environment or jupyter notebook.
 
 This module also defines Label, Textbox, Range, Choice, and Div
 widgets; the code for these are good examples of usage of Widget,
-Event, and Property objects.
+Trigger, and Property objects.
 
 User interaction should update the javascript model using
 model.set('propname', value); this will propagate to the python
@@ -28,10 +28,10 @@ class Model(object):
     Abstract base class that supports data binding.  Within __init__,
     a model subclass defines databound events and properties using:
 
-       self.evtname = Event()
+       self.evtname = Trigger()
        self.propname = Property(initval)
 
-    Any Event or Property member can be watched by registering a
+    Any Trigger or Property member can be watched by registering a
     listener with `model.on('propname', callback)`.
 
     An event can be triggered by `model.evtname.trigger(value)`.
@@ -60,39 +60,39 @@ class Model(object):
 
     def prop(self, name):
         '''
-        Returns the underlying Event or Property object for a
+        Returns the underlying Trigger or Property object for a
         property, rather than its held value.
         '''
         curvalue = super().__getattribute__(name)
-        if not isinstance(curvalue, Event):
-            raise AttributeError('%s not a property or event but %s' 
+        if not isinstance(curvalue, Trigger):
+            raise AttributeError('%s not a property or trigger but %s' 
                     % (name, str(type(curvalue))))
         return curvalue
 
     def _initprop_(self, name, value):
         '''
         To be overridden in base classes.  Handles initialization of
-        a new Event or Property member.
+        a new Trigger or Property member.
         '''
         return
 
     def __setattr__(self, name, value):
         '''
-        When a member is an Event or Property, then assignment notation
-        is delegated to the Event or Property so that notifications
+        When a member is an Trigger or Property, then assignment notation
+        is delegated to the Trigger or Property so that notifications
         and reparenting can be handled.  That is, `model.name = value`
         turns into `prop(name).set(value)`.
         '''
         if hasattr(self, name):
             curvalue = super().__getattribute__(name)
-            if isinstance(curvalue, Event):
+            if isinstance(curvalue, Trigger):
                 # Delegte "set" to the underlying Property.
                 curvalue.set(value)
             else:
                 super().__setattr__(name, value)
         else:
             super().__setattr__(name, value)
-            if isinstance(value, Event):
+            if isinstance(value, Trigger):
                 self._initprop_(name, value)
 
     def __getattribute__(self, name):
@@ -203,7 +203,7 @@ class Widget(Model):
             raise ValueError('base Model __init__ must be called')
         def notify_js(value):
             self._send_to_js_(id(self), name, value)
-        if isinstance(value, Event):
+        if isinstance(value, Trigger):
             value.on(notify_js)
 
     def _send_to_js_(self, *args):
@@ -245,20 +245,20 @@ class Widget(Model):
             cname = "comm_" + str(id(self))
             COMM_MANAGER.register_target(cname, open_comm)
 
-class Event(object):
+class Trigger(object):
     """
-    Event is the base class for Property and other data-bound
-    field objects.  Event holds a list of listeners that need to
+    Trigger is the base class for Property and other data-bound
+    field objects.  Trigger holds a list of listeners that need to
     be notified about the event.
 
-    Multple Event objects can be tied (typically a parent Model can
-    have Events that are triggered by children models).  To support
-    this, each Event can have a parent.
+    Multple Trigger objects can be tied (typically a parent Model can
+    have Triggers that are triggered by children models).  To support
+    this, each Trigger can have a parent.
 
-    Event objects provide a notification protocol where view
-    interactions cause triggers at a leaf that are sent up to the
-    root Event to be handled.  By default, the root handler accepts
-    triggers by notifying all listeners and children in the tree.
+    Trigger objects provide a notification protocol where view
+    interactions trigger events at a leaf that are sent up to the
+    root Trigger to be handled.  By default, the root handler accepts
+    events by notifying all listeners and children in the tree.
     """
     def __init__(self):
         self._listeners = []
@@ -281,14 +281,14 @@ class Event(object):
             self.handle(value)
     def set(self, value):
         '''
-        Sets the parent Event.  Child Events trigger events by
+        Sets the parent Trigger.  Child Triggers trigger events by
         triggering parents, and in turn they handle notifications
         that come from parents.
         '''
         if self.parent is not None:
             self.parent.off(self.handle)
             self.parent = None
-        if isinstance(value, Event):
+        if isinstance(value, Trigger):
             ancestor = value.parent
             while ancestor is not None:
                 if ancestor == self:
@@ -308,6 +308,8 @@ class Event(object):
                 cb() # no-parameter callback.
             else:
                 cb(value)
+            # TODO: consider adding a two-parameter callback form
+            # where a detailed event object can be added.
     def on(self, cb):
         '''
         Registers a listener.  Calling multiple times registers
@@ -320,9 +322,9 @@ class Event(object):
         '''
         self._listeners = [c for c in self._listeners if c != cb]
 
-class Property(Event):
+class Property(Trigger):
     """
-    A Property is just an Event that remembers its last value.
+    A Property is just an Trigger that remembers its last value.
     """
     def __init__(self, value=None):
         '''
@@ -349,8 +351,8 @@ class Property(Event):
         if isinstance(value, Property):
             super().set(value)
             self.handle(value.value)
-        elif isinstance(value, Event):
-            raise ValueError('Cannot set a Property to an Event')
+        elif isinstance(value, Trigger):
+            raise ValueError('Cannot set a Property to an Trigger')
         else:
             self.trigger(value)
 
@@ -362,7 +364,7 @@ class Property(Event):
 class Button(Widget):
     def __init__(self, label='button'):
         super().__init__()
-        self.click = Event()
+        self.click = Trigger()
         self.label = Property(label)
     def widget_js(self):
         return '''
@@ -500,11 +502,17 @@ class Choice(Widget):
         sep = " " if self.horizontal else "<br>"
         return f'<form id="{self.view_id()}">{sep.join(radios)}</form>'
 
+
 class Div(Widget):
-    def __init__(self, innerHTML=''):
+    def __init__(self, innerHTML='', style=None, data=None):
         super().__init__()
-        # databinding is defined using Property objects.
+        style = {} if style is None else style
+        data = {} if data is None else data
+        # TODO: convert non-string innerHTML objects to html; unify
+        # with the show() library.
         self.innerHTML = Property(innerHTML)
+        self.style = Property(style)
+        self.click = Trigger()
 
     def print(self, text, replace=False):
         newHTML = '<pre>%s</pre>' % html.escape(str(text));
@@ -517,6 +525,13 @@ class Div(Widget):
         # Note that if we want innerHTML to support script execution,
         # we need to do it explicitly, like this.
         return '''
+          function updater(attr) {
+            return (val) => { for (k in val) { element[attr][k] = val[k]; } }
+          }
+          model.on('style', updater('style'));
+          updater('style')();
+          model.on('data', updater('dataset'));
+          updater('dataset')();
           model.on('innerHTML', (innerHTML) => {
             element.innerHTML = innerHTML;
             Array.from(element.querySelectorAll("script")).forEach(old=>{
@@ -526,11 +541,33 @@ class Div(Widget):
               newScript.appendChild(document.createTextNode(old.innerHTML));
               old.parentNode.replaceChild(newScript, old);
             });
-          })
+          });
         '''
     def widget_html(self):
         return f'''
           <div id="{self.view_id()}">{self.innerHTML}</div>
+        '''
+
+class ClickDiv(Div):
+    '''
+    A Div that triggers click events when anything inside them is clicked.
+    If a clicked element contains a data-click value, then that value is
+    sent as the click event value.
+    '''
+    def __init__(self, innerHTML='', style=None, data=None):
+        super().__init__(innertHTML, style, data)
+        self.click = Trigger()
+
+    def widget_js(self):
+        return super().widget_js() + '''
+          element.addEventListener('click', (ev) => {
+            var target = ev.target;
+            while (target && target != element && !target.dataset.click) {
+              target = target.parentElement;
+            }
+            var value = target.dataset.click;
+            model.trigger('click', value);
+          });
         '''
 
 ##########################################################################
