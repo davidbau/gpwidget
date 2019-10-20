@@ -65,7 +65,7 @@ class Model(object):
         '''
         curvalue = super().__getattribute__(name)
         if not isinstance(curvalue, Trigger):
-            raise AttributeError('%s not a property or trigger but %s' 
+            raise AttributeError('%s not a property or trigger but %s'
                     % (name, str(type(curvalue))))
         return curvalue
 
@@ -461,13 +461,13 @@ class Range(Widget):
         '''
 
 class Choice(Widget):
-    def __init__(self, choices=None, horizontal=False):
+    def __init__(self, choices=None, selection=None, horizontal=False):
         super().__init__()
         if choices is None:
             choices = []
         self.choices = Property(choices)
         self.horizontal = Property(horizontal)
-        self.selection = Property(None)
+        self.selection = Property(selection)
     def widget_js(self):
         # Note that the 'input' event would enable during-drag feedback,
         # but this is pretty slow on google colab.
@@ -496,8 +496,9 @@ class Choice(Widget):
         '''
     def widget_html(self):
         radios = [
-            f"""<label><input name="choice" type="radio"
-            value="{html.escape(value)}">{html.escape(value)}</label>"""
+            f"""<label><input name="choice" type="radio" {
+            'checked' if value == self.selection else ''
+            } value="{html.escape(value)}">{html.escape(value)}</label>"""
             for value in self.choices ]
         sep = " " if self.horizontal else "<br>"
         return f'<form id="{self.view_id()}">{sep.join(radios)}</form>'
