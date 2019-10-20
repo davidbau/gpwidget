@@ -7,51 +7,15 @@ No use of requirejs: the design uses all inline javascript.
 
 Defines Model, Widget, Event, and Property, which set up data binding
 using the communication channels available in either google colab
-environment or jupyter notebook.  New can be defined as in the
-following example.
+environment or jupyter notebook.
 
-class TextWidget(Widget):
-  def __init__(self, value='', width=20):
-    super().__init__()
-    # databinding is defined using Property objects.
-    self.value = Property(value)
-    self.width = Property(width)
-    self.esc = Event()
-
-  def widget_js(self):
-    # Both "model" and "element" objects are defined within the scope
-    # where the js is run.  "element" looks for the element with id
-    # self.view_id(); if widget_html is overridden, this id should be used.
-    return '''
-      element.value = model.get('value');
-      element.width = model.get('width');
-      element.addEventListener('keydown', (e) => {
-        if (e.code == 'Enter') {
-          model.set('value', element.value);
-        }
-        if (e.code == 'Esc') {
-          model.trigger('esc', 'my event payload')
-        }
-      });
-      model.on('value', (value) => {
-        element.value = model.get('value');
-      });
-      model.on('width', (value) => {
-        element.width = model.get('width');
-      });
-    '''
-  def widget_html(self):
-    return f'''
-    <input id="{self.view_id()}"
-       value="{html.escape(str(self.value))}" width="{self.width}">
-    '''
+This module also defines Label, Textbox, Range, Choice, and Div
+widgets; the code for these are good examples of usage of Widget,
+Event, and Property objects.
 
 User interaction should update the javascript model using
 model.set('propname', value); this will propagate to the python
 model and notify any registered python listeners.
-
-Communication pattern goes in a V shape:
-User entry -> js model set -> python model ->  js model get -> User feedback
 
 TODO: Support jupyterlab also.
 """
@@ -105,7 +69,7 @@ class Model(object):
                     % (name, str(type(curvalue))))
         return curvalue
 
-    def _initprop(self, name, value):
+    def _initprop_(self, name, value):
         '''
         To be overridden in base classes.  Handles initialization of
         a new Event or Property member.
@@ -129,7 +93,7 @@ class Model(object):
         else:
             super().__setattr__(name, value)
             if isinstance(value, Event):
-                self._initprop(name, value)
+                self._initprop_(name, value)
 
     def __getattribute__(self, name):
         '''
@@ -142,28 +106,81 @@ class Model(object):
         return curvalue
 
 class Widget(Model):
+    '''
+    Base class for an HTML widget that uses a Javascript model object
+    to syncrhonize HTML view state with the backend Python model state.
+    Each widget subclass overrides widget_js to provide Javascript code
+    that defines the widget's behavior.  This javascript will be wrapped
+    in an immediately-invoked function and included in the widget's HTML
+    representation (_repr_html_) when the widget is viewed.
+
+    A widget's javascript is provided with two local variables:
+
+       element - the widget's root HTML element.  By default this is
+                 a <div> but can be overridden in widget_html.
+       model   - the object representing the data model for the widget.
+                 within javascript.
+
+    The model object provides the following javascript API:
+
+       model.get('propname') obtains a current property value.
+       model.set('propname', 'value') requests a change in value.
+       model.on('propname', callback) listens for property changes.
+       model.trigger('evtname', value) triggers an event.
+
+    Note that model.set just requests a change but does not change the
+    value immediately: model.get will not reflect the change until the
+    python backend has handled it and notified the javascript of the new
+    value, which will trigger any callbacks previously registered using
+    .on('propname', callback).  Thus Widget impelements a V-shaped
+    notification protocol:
+
+    User entry ->                 |              -> User-visible feedback
+        js model.set ->           |        -> js.model.on  callback
+          python prop.trigger ->  |   -> python prop.notify
+                         python prop.handle
+    '''
 
     def __init__(self):
         # In the jupyter case, there can be some delay between js injection
         # and comm creation, so we need to queue some initial messages.
-        self._comms = []
-        self._queue = []
+        if WIDGET_ENV == 'jupyter':
+            self._comms = []
+            self._queue = []
         # Each call to _repr_html_ creates a unique view instance.
         self._viewcount = 0
+        # Python notification is handled by Property objects.
         def handle_remote_set(name, value):
             self.prop(name).trigger(value)
-        self._recv_from_js(handle_remote_set)
-
-    def widget_html(self):
-        return f'<div id="{self.view_id()}"></div>'
+        self._recv_from_js_(handle_remote_set)
 
     def widget_js(self):
+        '''
+        Override to define the javascript logic for the widget.  Should
+        render the initial view based on the current model state (if not
+        already rendered using widget_html) and set up listeners to keep
+        the model and the view synchornized.
+        '''
         return ''
 
+    def widget_html(self):
+        '''
+        Override to define the initial HTML view of the widget.  Should
+        define an element with id given by view_id().
+        '''
+        return f'<div id="{self.view_id()}"></div>'
+
     def view_id(self):
+        '''
+        Returns an HTML element id for the view currently being rendered.
+        Note that each time _repr_html_ is called, this id will change.
+        '''
         return f"_{id(self)}_{self._viewcount}"
 
     def _repr_html_(self):
+        '''
+        Returns the HTML code for the widget.
+        '''
         self._viewcount += 1
         json_data = json.dumps({
                 k: v.value for k, v in vars(self).items()
@@ -181,15 +198,15 @@ class Widget(Model):
         </script>
         """
 
-    def _initprop(self, name, value):
+    def _initprop_(self, name, value):
         if not hasattr(self, '_viewcount'):
             raise ValueError('base Model __init__ must be called')
         def notify_js(value):
-            self._send_to_js(id(self), name, value)
+            self._send_to_js_(id(self), name, value)
         if isinstance(value, Event):
             value.on(notify_js)
 
-    def _send_to_js(self, *args):
+    def _send_to_js_(self, *args):
         if self._viewcount > 0:
             if WIDGET_ENV == 'colab':
                 colab_output.eval_js(f"""
@@ -204,7 +221,7 @@ class Widget(Model):
                 for comm in self._comms:
                     comm.send(args)
 
-    def _recv_from_js(self, fn):
+    def _recv_from_js_(self, fn):
         if WIDGET_ENV == 'colab':
             colab_output.register_callback(f"invoke_{id(self)}", fn)
         elif WIDGET_ENV == 'jupyter':
