@@ -69,10 +69,13 @@ def in_notebook():
     '''
     # From https://stackoverflow.com/a/39662359/265298
     try:
-        shell = get_ipython().__class__.__name__
-        if shell == 'ZMQInteractiveShell':
+        c = get_ipython().__class__
+        shell = c.__module__ + '.' + c.__name__
+        if shell.endswith('ZMQInteractiveShell'):
             return True   # Jupyter notebook or qtconsole
-        elif shell == 'TerminalInteractiveShell':
+        elif shell == 'google.colab._shell.Shell':
+            return True   # Colab notebook
+        elif shell.endswith('TerminalInteractiveShell'):
             return False  # Terminal running IPython
         else:
             return False  # Other type (?)
